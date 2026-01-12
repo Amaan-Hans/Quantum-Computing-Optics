@@ -1,225 +1,173 @@
+
+import matplotlib.pyplot as plt 
 import numpy as np
-import matplotlib.pyplot as plt
-import math
+import math 
 
-#========================
-# spatial grid
-#========================
+"""
+Define spatial grid
+"""
 
-N = 2**10          # grid resolution
-dx = 8e-6          # pixel size (meters)
+N = 2**10 # pixel resolution
+dx = 8e-6 # pixel size
+x = np.linspace(-N/2*dx, N/2*dx, N) # spatial axis
+y = np.linspace(-N/2*dx, N/2*dx, N) # spatial axis
+[X, Y] = np.meshgrid(x, y) # spatial grid
+Rho = np.sqrt(X**2 + Y**2) # radial coordinate
+Phi = np.arctan2(Y, X) # angular coordinate
 
-x = np.linspace(-N/2*dx, N/2*dx, N)
-y = np.linspace(-N/2*dx, N/2*dx, N)
-X, Y = np.meshgrid(x, y)
-
-Rho = np.sqrt(X**2 + Y**2)
-Phi = np.arctan2(Y, X)
-
-R_ap = (N/2) * dx
-rho = Rho / R_ap
+R_ap = (N/2) * dx       
+rho = Rho / R_ap           
 mask = rho <= 1
 
-#========================
-# Zernike functions
-#========================
-
+"""
+Zernike function
+"""
 def R_nm(n, m, rho):
-    """Zernike radial polynomial."""
     R = np.zeros_like(rho)
-    for k in range((n - m)//2 + 1):
-        num = (-1)**k * math.factorial(n - k)
-        den = (math.factorial(k) *
-               math.factorial((n + m)//2 - k) *
-               math.factorial((n - m)//2 - k))
-        R += num / den * rho**(n - 2*k)
+    for k in range((n-m)//2+1):
+        num = (-1)**k * math.factorial(n - k) / (math.factorial(k) * math.factorial((n + m)//2 - k) * math.factorial((n - m)//2 - k))
+        R+= num * rho**(n - 2*k)
     return R
-
 def Z_nm(n, m, rho, phi):
-    """Full Zernike mode"""
     Z = np.zeros_like(rho)
-    if m > 0:
+    if m>0:
         Z[mask] = R_nm(n, m, rho[mask]) * np.cos(m * phi[mask])
-    elif m < 0:
+    elif m<0:
         Z[mask] = R_nm(n, -m, rho[mask]) * np.sin(-m * phi[mask])
     else:
         Z[mask] = R_nm(n, 0, rho[mask])
     return Z
+"""
+Define Gaussian field
+"""
 
-#========================
-# simulate Gaussian field with Zernike phase
-#========================
+sigma = 3e-4   # width parameter 
 
-sigma = 9e-4
-U = np.exp(-(X**2 + Y**2) / sigma**2)
+U = np.exp(-(X**2 + Y**2) / sigma**2) # Gaussian field
+U = np.exp(-((X)**2 + (Y)**2) / sigma**2)
+Z = Z_nm(n=3, m=2, rho=rho, phi=Phi) # Zernike phase
+alpha = 4*np.pi
+phase = alpha * Z 
 
-Z = Z_nm(n=3, m=1, rho=rho, phi=Phi)
-alpha = 1*np.pi
-phase = alpha * Z
-U_complex = (U * mask) * np.exp(1j * phase)
+U_complex = (U * mask) * np.exp(1j * phase) #
 
-# Measurement planes
+
+"""
+Plot field
+"""
+
+plt.figure(figsize=(5,5))
+plt.imshow(Z, cmap="coolwarm")
+plt.colorbar(label="Phase")
+plt.title("Zernike")
+plt.axis("off")
+plt.show()
+
+plt.figure(figsize=(6,5))
+plt.subplot(1,3,1)
+plt.imshow(U*mask, cmap="gray")
+plt.title("Amplitude")
+plt.axis("off")
+
+plt.subplot(1,3,2)
+plt.imshow(np.angle(U_complex), cmap="twilight")
+plt.title("Phase alpha")
+plt.axis("off")
+plt.colorbar()
+
+plt.subplot(1,3,3)
+plt.imshow(np.abs(U_complex)**2, cmap="gray")
+plt.title("Intensity")
+plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
 A1 = np.abs(U_complex)
 U2 = np.fft.fft2(U_complex, norm="ortho")
 A2 = np.abs(U2)
+# save
 
-# Save simulated measurements
 np.save("./Simulations/A1.npy", A1)
 np.save("./Simulations/A2.npy", A2)
+
+# eval
 np.save("./Simulations/phi_true.npy", np.angle(U_complex))
 
+plt.figure(figsize=(6,5))
+plt.subplot(1,3,1)
+plt.imshow(U*mask, cmap="gray")
+plt.title("Amplitude")
+plt.axis("off")
 
-#========================
-# Gerchberg Saxto
-#========================
+plt.subplot(1,3,2)
+plt.imshow(np.angle(U2), cmap="twilight")
+plt.title("Phase alpha")
+plt.axis("off")
+plt.colorbar()
 
-def gerchberg_saxton(A1, A2, n_iters=200, seed=0, beta=0.8, use_hio=False, gamma=0.9):
-    """
-    gerchberg saxton
-    """
+plt.subplot(1,3,3)
+plt.imshow(np.abs(U2)**2, cmap="gray")
+plt.title("Intensity")
+plt.axis("off")
+
+A1 = np.load("./Simulations/A1.npy")
+A2 = np.load("./Simulations/A2.npy")
+
+
+def gerchberg_saxton(A1, A2, n_iters=200, seed=0, eps=1e-12):
     rng = np.random.default_rng(seed)
     phi0 = rng.uniform(-np.pi, np.pi, A1.shape)
     U1 = A1 * np.exp(1j * phi0)
 
-    U1_old = U1.copy()
     errors = []
 
     for i in range(n_iters):
-
-        # Forward propagation
+        # propagate to plane 2 (unitary FFT)
+        beta = 0.8
         U2_tmp = np.fft.fft2(U1, norm="ortho")
+        U2 = (beta*A2 + (1-beta)*np.abs(U2_tmp)) * np.exp(1j*np.angle(U2_tmp))
 
-        # Relaxed amplitude constraint in plane 2
-        mag = beta*A2 + (1-beta)*np.abs(U2_tmp)
-        U2 = mag * np.exp(1j * np.angle(U2_tmp))
+        # enforce amplitude constraint in plane 2
+        U2 = A2 * np.exp(1j * np.angle(U2))
 
-        # Back propagation
-        U1_tmp = np.fft.ifft2(U2, norm="ortho")
+        # propagate back to plane 1 (unitary IFFT)
+        U1 = np.fft.ifft2(U2, norm="ortho")
 
-        # Enforce amplitude at plane 1
-        U1_new = A1 * np.exp(1j * np.angle(U1_tmp))
+        # enforce amplitude + support in plane 1
+        U1 = mask * (A1 * np.exp(1j * np.angle(U1)))
 
-        if use_hio:
-            U1 = U1_new + gamma * (U1_new - U1_old)
-        else:
-            U1 = U1_new
-
-        U1_old = U1_new.copy()
-
-        # Error metric
+        # compute error in plane 2 amplitude (unitary FFT)
         U2_check = np.fft.fft2(U1, norm="ortho")
-        err = np.mean((np.abs(U2_check) - A2)**2)
-        errors.append(err)
+        error = np.mean((np.abs(U2_check) - A2)**2)
+        errors.append(error)
 
     return U1, np.array(errors)
 
 
-#========================
-# Field eval
-#========================
+U1_est, errors = gerchberg_saxton(A1, A2, n_iters=200, seed=5)
+phase_est = np.angle(U1_est)
+amp_est = np.abs(U1_est)
 
-def evaluate_fields(U_true, U_est, dx):
-    amp_true = np.abs(U_true)
-    amp_est = np.abs(U_est)
+import matplotlib.pyplot as plt
+plt.figure(figsize=(12,4))
 
-    phi_true = np.angle(U_true)
-    phi_est = np.angle(U_est)
+plt.subplot(1,3,1)
+plt.imshow(amp_est, cmap="gray")
+plt.title("Recovered amplitude |U1|")
+plt.axis("off")
 
-    phase_err = np.angle(np.exp(1j * (phi_est - phi_true)))
+plt.subplot(1,3,2)
+plt.imshow(phase_est, cmap="twilight")
+plt.title("Recovered phase arg(U1)")
+plt.axis("off")
+plt.colorbar()
 
-    amp_mse = np.mean((amp_true - amp_est)**2)
-
-    inner = np.sum(U_true * np.conj(U_est)) * dx * dx
-    F = np.abs(inner)**2 / (np.sum(amp_true**2) * np.sum(amp_est**2))
-
-    return {
-        "inner": inner,
-        "F": F,
-        "amp_mse": amp_mse,
-        "phase_err": phase_err,
-        "amp_true": amp_true,
-        "amp_est": amp_est,
-        "phi_true": phi_true,
-        "phi_est": phi_est
-    }
-
-
-#========================
-# plot
-#========================
-
-def plot_reconstruction_results(results):
-    amp_true = results["amp_true"]
-    amp_est = results["amp_est"]
-    phi_true = results["phi_true"]
-    phi_est = results["phi_est"]
-    phase_err = results["phase_err"]
-
-    plt.figure(figsize=(14,8))
-
-    plt.subplot(2,3,1)
-    plt.imshow(amp_true, cmap="gray")
-    plt.title("True amplitude |U|")
-    plt.axis("off")
-
-    plt.subplot(2,3,2)
-    plt.imshow(phi_true, cmap="twilight")
-    plt.title("True phase arg(U)")
-    plt.axis("off")
-    plt.colorbar()
-
-    plt.subplot(2,3,3)
-    plt.imshow(amp_true**2, cmap="gray")
-    plt.title("True intensity |U|^2")
-    plt.axis("off")
-
-    plt.subplot(2,3,4)
-    plt.imshow(amp_est, cmap="gray")
-    plt.title("Recovered amplitude |U_est|")
-    plt.axis("off")
-
-    plt.subplot(2,3,5)
-    plt.imshow(phi_est, cmap="twilight")
-    plt.title("Recovered phase arg(U_est)")
-    plt.axis("off")
-    plt.colorbar()
-
-    plt.subplot(2,3,6)
-    plt.imshow(phase_err, cmap="coolwarm")
-    plt.title("Wrapped phase error")
-    plt.axis("off")
-    plt.colorbar()
-
-    plt.tight_layout()
-    plt.show()
-
-
-#========================
-# Run
-#========================
-
-if __name__ == "__main__":
-
-    print("Loading measurement data...")
-    A1 = np.load("./Simulations/A1.npy")
-    A2 = np.load("./Simulations/A2.npy")
-
-    print("Running Gerchberg–Saxton...")
-    U1_est, errors = gerchberg_saxton(
-        A1, A2,
-        n_iters=200,
-        seed=5,
-        beta=0.8,
-        use_hio=True,      # HIO recommended
-        gamma=0.9
-    )
-
-    print("Evaluating reconstruction...")
-    results = evaluate_fields(U_complex, U1_est, dx)
-
-    print("Fidelity:", results["F"])
-    print("Amplitude MSE:", results["amp_mse"])
-
-    print("Plotting results")
-    plot_reconstruction_results(results)
-
+plt.subplot(1,3,3)
+plt.plot(errors)
+plt.title("Plane-2 amplitude error vs iteration")
+plt.xlabel("Iteration")
+plt.ylabel("MSE")
+plt.tight_layout()
+plt.show()
+#extra eval
