@@ -84,10 +84,9 @@ plt.tight_layout()
 plt.show()
 
 A1 = np.abs(U_complex)
-U2 = np.fft.fft2(U_complex)
-
-
+U2 = np.fft.fft2(U_complex, norm="ortho")
 A2 = np.abs(U2)
+# save
 
 np.save("./Simulations/A1.npy", A1)
 np.save("./Simulations/A2.npy", A2)
@@ -116,11 +115,7 @@ A1 = np.load("./Simulations/A1.npy")
 A2 = np.load("./Simulations/A2.npy")
 
 
-def gerchberg_saxton(A1, A2, n_iters=200, seed = 0, eps=1e-12):
-    """
-    Gerchberg-Saxton algorithm for phase retrieval.
-    """
-    # random intial phase in plane 1
+def gerchberg_saxton(A1, A2, n_iters=200, seed=0, eps=1e-12):
     rng = np.random.default_rng(seed)
     phi0 = rng.uniform(-np.pi, np.pi, A1.shape)
     U1 = A1 * np.exp(1j * phi0)
@@ -128,20 +123,27 @@ def gerchberg_saxton(A1, A2, n_iters=200, seed = 0, eps=1e-12):
     errors = []
 
     for i in range(n_iters):
-        # propagate to plane 2
-        U2 = np.fft.fft2(U1)
+        # propagate to plane 2 (unitary FFT)
+        beta = 0.8
+        U2_tmp = np.fft.fft2(U1, norm="ortho")
+        U2 = (beta*A2 + (1-beta)*np.abs(U2_tmp)) * np.exp(1j*np.angle(U2_tmp))
+
         # enforce amplitude constraint in plane 2
         U2 = A2 * np.exp(1j * np.angle(U2))
-        # propagate back to plane 1
-        U1 = np.fft.ifft2(U2)
-        # enforce amplitude constraint in plane 1
+
+        # propagate back to plane 1 (unitary IFFT)
+        U1 = np.fft.ifft2(U2, norm="ortho")
+
+        # enforce amplitude + support in plane 1
         U1 = mask * (A1 * np.exp(1j * np.angle(U1)))
 
-        # compute error
-        U2_check = np.fft.fft2(U1)
+        # compute error in plane 2 amplitude (unitary FFT)
+        U2_check = np.fft.fft2(U1, norm="ortho")
         error = np.mean((np.abs(U2_check) - A2)**2)
         errors.append(error)
+
     return U1, np.array(errors)
+
 
 U1_est, errors = gerchberg_saxton(A1, A2, n_iters=200, seed=5)
 phase_est = np.angle(U1_est)
@@ -168,3 +170,4 @@ plt.xlabel("Iteration")
 plt.ylabel("MSE")
 plt.tight_layout()
 plt.show()
+#extra eval
