@@ -129,8 +129,9 @@ def evaluate_fields(U_true, U_est, dx):
 
     amp_mse = np.mean((amp_true - amp_est)**2)
 
-    inner = np.sum(U_true * np.conj(U_est)) * dx * dx
-    F = np.abs(inner)**2 / (np.sum(amp_true**2) * np.sum(amp_est**2))
+    inner = np.sum(U_true * np.conj(U_est))
+    F = np.abs(inner)**2 / (np.sum(np.abs(U_true)**2) * np.sum(np.abs(U_est)**2))
+
 
     return {
         "inner": inner,
@@ -210,7 +211,7 @@ if __name__ == "__main__":
         n_iters=200,
         seed=5,
         beta=0.8,
-        use_hio=True,      # HIO recommended
+        use_hio=True,  
         gamma=0.9
     )
 
